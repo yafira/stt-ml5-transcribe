@@ -52,6 +52,16 @@ body {
   font-weight: 600;
 }
 
+.demo-title {
+  margin-top: 0;
+  color: #766d92;
+}
+
+.shortcut-hint {
+  color: #666;
+  margin: 10px 0;
+}
+
 /* button base style */
 button {
   padding: 14px 28px;
