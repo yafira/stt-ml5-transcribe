@@ -11,73 +11,70 @@ class ml5Transcribe {
     this.callback = null;
     this.isRecording = false;
     this.streamInterval = null;
-    
+
     this.init(onReady);
   }
 
+  // load model once
   async init(onReady) {
     try {
-      console.log('Loading model...');
-      // load whisper tiny for speed - can change to base/small/medium
-      this.transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en');
-      console.log('Model loaded!');
-      if (onReady) onReady();
+      console.log('loading model...');
+      // load whisper tiny for speed (can switch to base/small/medium later)
+      this.transcriber = await pipeline(
+        'automatic-speech-recognition',
+        'Xenova/whisper-tiny.en'
+      );
+      console.log('model loaded!');
+      onReady && onReady();
     } catch (err) {
-      console.error('Failed to load model:', err);
+      console.error('failed to load model:', err);
     }
   }
 
+  // start listening (continuous or single-shot)
   async startListening(callback, { continuous = false, chunkDuration = 3000 } = {}) {
     if (this.isRecording) return;
-    
+
     try {
       this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.recorder = new MediaRecorder(this.mediaStream);
       this.callback = callback;
       this.chunks = [];
+      this.isRecording = true;
 
+      // collect chunks
       this.recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) this.chunks.push(e.data);
+        if (e.data.size) this.chunks.push(e.data);
       };
 
       if (continuous) {
-        this.startContinuousMode(chunkDuration);
+        // real-time style: periodically request data, process, then clear buffer
+        this.recorder.start();
+        this.streamInterval = setInterval(() => {
+          if (this.recorder.state !== 'recording') return;
+          this.recorder.requestData();
+          if (!this.chunks.length) return;
+          const blob = new Blob(this.chunks, { type: 'audio/webm' });
+          this.chunks = [];
+          this.processAudio(blob, true);
+        }, chunkDuration);
       } else {
-        this.startSingleMode();
+        // single-shot: process once on stop
+        this.recorder.onstop = async () => {
+          const blob = new Blob(this.chunks, { type: 'audio/webm' });
+          await this.processAudio(blob, false);
+        };
+        this.recorder.start();
       }
 
-      this.isRecording = true;
-      console.log('Recording started...');
+      console.log('recording started...');
     } catch (err) {
-      console.error('Microphone access denied:', err);
-      if (callback) callback(err, null);
+      console.error('microphone access denied:', err);
+      callback && callback(err, null);
     }
   }
 
-  startContinuousMode(chunkDuration) {
-    // process audio chunks every N seconds for real-time transcription
-    this.recorder.start();
-    this.streamInterval = setInterval(() => {
-      if (this.recorder.state === 'recording') {
-        this.recorder.requestData();
-        if (this.chunks.length > 0) {
-          const audioBlob = new Blob(this.chunks, { type: 'audio/webm' });
-          this.chunks = [];
-          this.processAudio(audioBlob, true);
-        }
-      }
-    }, chunkDuration);
-  }
-
-  startSingleMode() {
-    // wait for stop, then transcribe entire recording
-    this.recorder.onstop = async () => {
-      const audioBlob = new Blob(this.chunks, { type: 'audio/webm' });
-      await this.processAudio(audioBlob, false);
-    };
-    this.recorder.start();
-  }
-
+  // stop listening
   stopListening() {
     if (!this.isRecording) return;
 
@@ -85,63 +82,62 @@ class ml5Transcribe {
       clearInterval(this.streamInterval);
       this.streamInterval = null;
     }
-    
-    if (this.recorder) this.recorder.stop();
+
+    this.recorder && this.recorder.state !== 'inactive' && this.recorder.stop();
+
     if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
+      this.mediaStream.getTracks().forEach((t) => t.stop());
       this.mediaStream = null;
     }
-    
+
     this.isRecording = false;
-    console.log('Recording stopped');
+    console.log('recording stopped');
   }
 
+  // process a blob through whisper
   async processAudio(audioBlob, isInterim) {
-    // skip tiny chunks
-    if (!this.transcriber || audioBlob.size < 1000) return;
+    // ignore tiny/empty blobs or if model not ready
+    if (!this.transcriber || !audioBlob || audioBlob.size < 1000) return;
 
     try {
       const arrayBuffer = await audioBlob.arrayBuffer();
-      
+
+      // lazy-create audio context
       if (!this.audioContext) {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
       }
-      
+
       const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
       let audioData = audioBuffer.getChannelData(0);
-      
-      // whisper expects 16kHz mono audio
+
+      // whisper expects 16khz mono
       if (audioBuffer.sampleRate !== 16000) {
         audioData = this.resample(audioData, audioBuffer.sampleRate, 16000);
       }
 
       const result = await this.transcriber(audioData);
-      
-      if (this.callback) {
-        this.callback(null, { text: result.text, isFinal: !isInterim });
-      }
+      this.callback && this.callback(null, { text: result.text, isFinal: !isInterim });
     } catch (err) {
-      console.error('Transcription error:', err);
-      if (this.callback) this.callback(err, null);
+      console.error('transcription error:', err);
+      this.callback && this.callback(err, null);
     }
   }
 
-  resample(audioData, fromRate, toRate) {
-    // simple linear interpolation resampling
+  // simple linear interpolation resampling to 16khz
+  resample(input, fromRate, toRate) {
     const ratio = fromRate / toRate;
-    const newLength = Math.round(audioData.length / ratio);
-    const result = new Float32Array(newLength);
-    
-    for (let i = 0; i < newLength; i++) {
-      const srcIndex = i * ratio;
-      const floor = Math.floor(srcIndex);
-      const t = srcIndex - floor;
-      const s1 = audioData[floor] || 0;
-      const s2 = audioData[floor + 1] || 0;
-      result[i] = s1 + (s2 - s1) * t;
+    const outLen = Math.round(input.length / ratio);
+    const out = new Float32Array(outLen);
+
+    for (let i = 0; i < outLen; i++) {
+      const src = i * ratio;
+      const i0 = Math.floor(src);
+      const t = src - i0;
+      const a = input[i0] || 0;
+      const b = input[i0 + 1] || 0;
+      out[i] = a + (b - a) * t;
     }
-    
-    return result;
+    return out;
   }
 }
 
