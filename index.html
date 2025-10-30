@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ml5.transcribe() - stt demo</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/addons/p5.sound.min.js"></script>
+</head>
+<body>
+  <div id="sketch-holder"></div>
+  <div class="controls">
+    <h3 style="margin-top:0; color: #766d92;">ml5.transcribe() Demo</h3>
+    <p style="color: #666; margin: 10px 0;">
+      <strong>S</strong> - start recording | <strong>D</strong> - stop | <strong>C</strong> - clear 
+      <strong>Space</strong> - toggle continuous mode
+    </p>
+    <button id="recordBtn">Start Recording (S)</button>
+    <button id="clearBtn">Clear Transcripts (C)</button>
+    <button id="continuousBtn">Continuous Mode: OFF</button>
+    <div class="status" id="status">Model loading... please wait</div>
+    <div class="transcript" id="transcript">Transcripts will appear here...</div>
+  </div>
+
+  <script type="module" src="ml5Transcribe.js"></script>
+  <script src="sketch.js"></script>
+</body>
+</html>
